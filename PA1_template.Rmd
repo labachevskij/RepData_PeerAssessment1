@@ -14,50 +14,130 @@ temp <- tempfile()
 temp <- unzip(zipfile = "activity.zip",files = "activity.csv")
 data <- read.csv(temp)
 head(data)
-library(lubridate)
-data$date <- ymd(data$date)
-head(data)
 ```
 Now we want to preprocess the data a little bit, for example to get a proper 
 date field.
 ```{r preprocessing, echo=TRUE}
-#setClass('myDate')
-#setAs("character", "myDate", function(from) as.Date(from, format = "%Y-%m-%d"))
-#setClass('myTime')
-#setAs("character", "myTime", function(from) format(from, format = "%T"))
-#data <- read.csv(temp, colClasses = c("numeric", "myDate", "myTime"))
+library(lubridate)
+data$date <- ymd(data$date)
 unlink(temp)
-#head(data)
 ```
 ## What is mean total number of steps taken per day?
-```{r histogram, echo=TRUE}
+We continue our processing, using library dplyr. We create the object we are interested to print.
+```{r histogram_prep, echo=TRUE, message=FALSE}
 library(dplyr)
 library(ggplot2)
 data_tbl <- tbl_df(data)
 data_hist <- group_by(data_tbl, date) %>%
   summarise(sum(steps))
 names(data_hist)[2] <- "tot_steps"
-# plot(data_hist, type = "h",
-#      main = "Total number of steps per day",
-#      xlab = "Date",
-#      ylab = "Number of steps")
-#head(data_hist)
 ```
-```{r histogram_plot, fig.width=20}
+Now we can print the histogram
+```{r histogram_plot, fig.width=20, warning = FALSE}
 ggplot(data_hist, aes(x = date, y = tot_steps)) + geom_bar(stat = "identity") + 
   ggtitle("Total number of steps per day") + 
   theme(axis.title.x = element_blank()) + ylab("Number of steps")
-# data_tbl_alt <- group_by(data_tbl, date)
-# ggplot(data_tbl_alt, aes(x = date, y = steps)) + geom_bar(stat = "identity")
 ```
-
-
+Now we want to compute the mean and median number of steps per day.
+```{r mean_median}
+steps_mean <- mean(data_hist$tot_steps, na.rm = TRUE)
+steps_median <- median(data_hist$tot_steps, na.rm = TRUE)
+print(paste("The average total number of steps per day is:", steps_mean))
+print(paste("The median total number of steps per day is:", steps_median))
+unlink(data_hist)
+```
 ## What is the average daily activity pattern?
 
+```{r ts_prep}
+data_ts <- group_by(data_tbl, interval) %>%
+  summarise(mean(steps, na.rm = TRUE))
+names(data_ts)[2] <- "av_steps"
+time_format <- function(x){
+  h <- floor(trunc(x/100))
+  m <- round(100*(x/100-h))
+  labl <- sprintf('%02d:%02d',h,m)
+}
+```
 
+```{r ts_plot, fig.width=20}
+ggplot(data_ts, aes(x = interval, y = av_steps)) + geom_line() + 
+  ggtitle("Average number of steps throughout the day") + 
+  theme(axis.title.x = element_blank()) + ylab("Number of steps") + 
+  scale_x_continuous(label = time_format)
+```
 
+```{r max_interv}
+max_int <- which(data_ts$av_steps == max(data_ts$av_steps))
+print(paste("The interval when the maximum number of steps is taken (on average) is:",time_format(data_ts$interval[max_int])))
+```
 ## Imputing missing values
+Count the number of NAs
+```{r count_NAs}
+num_nas <- length(data_tbl$steps[is.na(data_tbl$steps)])
+print(paste("The number of NAs is:", num_nas))
+```
+Now my strategy is to use the rounded mean number of steps for that time interval
 
+```{r strategy}
+data_tbl_2 <- group_by(data_tbl, interval) %>%
+  mutate(steps = ifelse(is.na(steps),round(mean(steps,na.rm=TRUE)),steps))
+data_hist_2 <- group_by(data_tbl_2, date) %>%
+  summarise(sum(steps))
+names(data_hist_2)[2] <- "tot_steps"
+```
 
+```{r histogram_plot_2, fig.width=20, warning = FALSE}
+ggplot(data_hist_2, aes(x = date, y = tot_steps)) + geom_bar(stat = "identity") + 
+  ggtitle("Total number of steps per day") + 
+  theme(axis.title.x = element_blank()) + ylab("Number of steps")
+```
+
+```{r mean_median_2}
+steps_mean_2 <- mean(data_hist_2$tot_steps, na.rm = TRUE)
+steps_median_2 <- median(data_hist_2$tot_steps, na.rm = TRUE)
+print(paste("The average total number of steps per day is:", steps_mean_2))
+print(paste("The median total number of steps per day is:", steps_median_2))
+```
+
+The previous one has the effect of rising the number of steps to some quantity for days when the device has not been worn (here there is no such thing as the right choice, as it might have been forgotten home (so that replacing with the mean in that time interval makes sense), or the wearer might have been home sick (so that a total of 0 is completely reasonable)).
+Just to see if things are very different let's take a different strategy: the mean in that day, replacing NaNs with 0 (happens when there are no data for the whole day).
+
+```{r strategy_2}
+data_tbl_3 <- group_by(data_tbl, date) %>%
+  mutate(steps = as.numeric(ifelse(is.na(steps), ifelse(is.nan(round(mean(steps,na.rm=TRUE))),0,round(mean(steps,na.rm=TRUE))),steps)))
+data_hist_3 <- group_by(data_tbl_3, date) %>%
+  summarise(sum(steps))
+names(data_hist_3)[2] <- "tot_steps"
+```
+
+```{r histogram_plot_3, fig.width=20, warning = FALSE}
+ggplot(data_hist_3, aes(x = date, y = tot_steps)) + geom_bar(stat = "identity") + 
+  ggtitle("Total number of steps per day") + 
+  theme(axis.title.x = element_blank()) + ylab("Number of steps")
+```
+
+```{r mean_median_3}
+steps_mean_3 <- mean(data_hist_3$tot_steps, na.rm = TRUE)
+steps_median_3 <- median(data_hist_3$tot_steps, na.rm = TRUE)
+print(paste("The average total number of steps per day is:", steps_mean_3))
+print(paste("The median total number of steps per day is:", steps_median_3))
+unlink(data_hist_3)
+```
+The average number of steps is way lower in this case, but the median number is not that different. In fact the big difference is that we have days where there are no steps taken that lower a lot the mean, but when steps are taken, they tend to fall around the mean. We will use the second modified dataset.
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+```{r weekdays}
+data_ts_n <- mutate(data_tbl_3, we_wd = ifelse(weekdays(date)%in% c("Saturday","Sunday"),"weekend", "weekday" ))
+data_ts_n <- group_by(data_ts_n, interval, we_wd) %>%
+  summarise(mean(steps, na.rm = TRUE))
+head(data_ts_n)
+names(data_ts_n)[3] <- "av_steps"
+```
+
+```{r ts_plot_n, fig.width=20}
+ggplot(data_ts_n, aes(x = interval, y = av_steps)) + geom_line() + 
+  ggtitle("Average number of steps throughout the day") + 
+  theme(axis.title.x = element_blank()) + ylab("Number of steps") + 
+  scale_x_continuous(label = time_format) + facet_grid(we_wd ~ .)
+```
